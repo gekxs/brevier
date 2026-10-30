@@ -678,6 +678,7 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     private fun showTabList() {
+        closeFloats()
         showBar()
         fillTabList()
         tabList.visibility = View.VISIBLE
@@ -1021,7 +1022,8 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun toggleShelf() {
         if (shelf.open) shelf.hide() else if (!shelf.empty) {
-                showBar()
+            closeFloats()
+            showBar()
             shelf.show()
             scrolled()
             hideKeyboard()
@@ -1635,6 +1637,19 @@ class MainActivity : Activity(), ArticleHost {
         popup.showAsDropDown(anchor, xoff, -(anchor.height + content.measuredHeight))
     }
 
+    /**
+     * The address card and the suggestions sit in windows of their own, above
+     * the page, and an outside tap does not put them away. Anything opened
+     * over the page would get them hanging on top of it, so it puts them away
+     * first — and takes the focus from the address field, which is what would
+     * otherwise bring the card straight back.
+     */
+    private fun closeFloats() {
+        hints.dismiss()
+        hideCard()
+        address.clearFocus()
+    }
+
     private fun hideCard() {
         card?.dismiss()
         card = null
@@ -1871,6 +1886,7 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     private fun showSettings() {
+        closeFloats()
         showBar()
         settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown, barBottom)
     }
