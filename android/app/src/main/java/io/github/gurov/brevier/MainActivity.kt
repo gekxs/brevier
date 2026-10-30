@@ -63,6 +63,12 @@ class MainActivity : Activity(), ArticleHost {
     private var systemHigh = false
     /** Уезжает ли шапка, пока читают (#45): настройка, по умолчанию — да. */
     private var slideBar = true
+    /** Стоит ли шапка внизу экрана (#45): настройка, по умолчанию — сверху. */
+    private var barBottom = false
+    /** Низ окна под системными панелями и клавиатурой: шапке есть куда уехать вниз. */
+    private var insetBottom = 0
+    /** Whether `build` finished: before that there is no low edge to move. */
+    private var laid = false
     /** Карточки заметок под абзацами (#42): настройка, по умолчанию — да. */
     private var notesShown = true
     /** Насколько шапка уехала вверх: 0 — на месте, её рост — вся. */
@@ -96,6 +102,8 @@ class MainActivity : Activity(), ArticleHost {
     private lateinit var tabCount: TextView
     private lateinit var more: ImageButton
     private lateinit var stage: FrameLayout
+    /** Полоса прогресса и поиск: внизу экрана их приподнимает шапка (`fitFoot`). */
+    private lateinit var foot: LinearLayout
     private lateinit var findBar: LinearLayout
     private lateinit var needle: EditText
     private lateinit var tally: TextView
@@ -144,6 +152,7 @@ class MainActivity : Activity(), ArticleHost {
         }
         systemHigh = systemContrast()
         slideBar = stored.optBoolean("slideBar", true)
+        barBottom = stored.optBoolean("barBottom", false)
         notesShown = stored.optBoolean("notes", true)
         assisted = assistance()
         images = stored.optBoolean("images", true)
@@ -302,18 +311,27 @@ class MainActivity : Activity(), ArticleHost {
         stage = FrameLayout(this)
         column.addView(stage, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
 
+        // Полоса прогресса и поиск — одним низом: шапка внизу приподнимает их
+        // целиком (`fitFoot`), и ни одна из них не прячется под ней.
+        foot = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         strip = ProgressStrip(this)
         strip.source = { stripSource() }
         strip.notes = { currentTab()?.notes?.filter { it.placed }?.map { it.from } ?: emptyList() }
-        column.addView(strip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(7f)))
+        foot.addView(strip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(7f)))
 
         findBar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             visibility = View.GONE
             setPadding(dp(12f), dp(2f), dp(4f), dp(2f))
         }
-        column.addView(findBar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        root.addView(bar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP))
+        foot.addView(findBar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        column.addView(foot, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        // Где шапка: сверху по умолчанию, внизу — если читатель так выбрал (#45).
+        root.addView(bar, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            if (barBottom) Gravity.BOTTOM else Gravity.TOP,
+        ))
 
         notice = TextView(this).apply {
             visibility = View.GONE
@@ -339,8 +357,9 @@ class MainActivity : Activity(), ArticleHost {
             changed = { dark, images -> changeSettings(dark, images) },
             contrasted = { on -> changeContrast(on) },
             slid = { on -> changeSlideBar(on) },
+            placed = { on -> changeBarBottom(on) },
             notesUnder = { on -> changeNotesShown(on) },
-            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown) },
+            keepCopies = { on -> archive = on; Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, barBottom) },
             forget = { forgetEverything() },
             browser = { askToBeBrowser() },
             typeChanged = { chosen -> changeType(chosen) },
@@ -441,6 +460,7 @@ class MainActivity : Activity(), ArticleHost {
 
         setContentView(root)
         root.setOnApplyWindowInsetsListener { view, insets -> fitInsets(view, insets) }
+        laid = true
     }
 
     /**
@@ -451,10 +471,12 @@ class MainActivity : Activity(), ArticleHost {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             val ime = insets.getInsets(WindowInsets.Type.ime())
-            view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            insetBottom = maxOf(bars.bottom, ime.bottom)
+            view.setPadding(bars.left, bars.top, bars.right, insetBottom)
         } else {
             @Suppress("DEPRECATION")
-            view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+            insetBottom = insets.systemWindowInsetBottom
+            view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insetBottom)
         }
         return insets
     }
@@ -631,7 +653,7 @@ class MainActivity : Activity(), ArticleHost {
             stage.addView(view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             if (reading) view.requestFocus()
         }
-        view.reserve(bar.height)
+        view.reserve(bar.height, barBottom)
         showBar()
         if (tab.pending) wakeTab(tab) else if (fresh) render(tab)
         closeFind()
@@ -663,6 +685,7 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     private fun fillTabList() {
+        tabList.below(barBottom)
         tabList.fill(tabs.map { it.title to (it.current() ?: "") }, current)
     }
 
@@ -998,7 +1021,7 @@ class MainActivity : Activity(), ArticleHost {
 
     private fun toggleShelf() {
         if (shelf.open) shelf.hide() else if (!shelf.empty) {
-            showBar()
+                showBar()
             shelf.show()
             scrolled()
             hideKeyboard()
@@ -1250,7 +1273,7 @@ class MainActivity : Activity(), ArticleHost {
     /** Карточки заметок под абзацами (#42) — включить или выключить. */
     private fun changeNotesShown(on: Boolean) {
         notesShown = on
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, barBottom)
         for (tab in tabs) tab.view?.showCards(on)
     }
 
@@ -1576,7 +1599,7 @@ class MainActivity : Activity(), ArticleHost {
             // Не фокусируемая: набор идёт в строку, а не в карточку.
             inputMethodMode = PopupWindow.INPUT_METHOD_NEEDED
             elevation = dp(4f).toFloat()
-            showAsDropDown(bar, dropMargin, 0)
+            if (barBottom) dropAbove(this, bar, dropMargin) else showAsDropDown(bar, dropMargin, 0)
         }
     }
 
@@ -1598,6 +1621,19 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Отступ карточки и подсказок от краёв панели. */
     private val dropMargin get() = dp(6f)
+
+    /**
+     * Выпадающее окно над шапкой: шапка внизу, и вниз от неё места нет.
+     * Высоту берём у содержимого — каким оно вышло, на столько и отступаем.
+     */
+    private fun dropAbove(popup: PopupWindow, anchor: View, xoff: Int) {
+        val content = popup.contentView
+        content.measure(
+            View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        popup.showAsDropDown(anchor, xoff, -(anchor.height + content.measuredHeight))
+    }
 
     private fun hideCard() {
         card?.dismiss()
@@ -1764,6 +1800,8 @@ class MainActivity : Activity(), ArticleHost {
         // Высота — по строкам, а не до клавиатуры: пустой хвост списка
         // закрывал страницу и ничего не предлагал.
         hints.height = hintRows.size * dp(if (hintRows.any { it.second.isNotEmpty() }) 60f else 40f) + dp(8f)
+        // Внизу шапки список выпадал бы за край экрана — он встаёт над ней.
+        hints.verticalOffset = if (barBottom) -(bar.height + hints.height) else 0
         if (!hints.isShowing) hints.show() else hints.show()
     }
 
@@ -1828,19 +1866,43 @@ class MainActivity : Activity(), ArticleHost {
         // Архива списком нет: он — история и закладки с текстом (13 октября 2026).
         menu.item("Search what you've read") { searchArchive() }
         menu.item("Settings") { showSettings() }
+        menu.above = barBottom
         menu.show(more)
     }
 
     private fun showSettings() {
         showBar()
-        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown)
+        settings.show(palette, theme, images, archive, isBrowser(), reader, slideBar, notesShown, barBottom)
     }
 
     /** Шапке — уезжать или стоять (#45). */
     private fun changeSlideBar(on: Boolean) {
         slideBar = on
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, barBottom)
         if (!on) showBar()
+    }
+
+    /**
+     * Где шапке стоять (#45): внизу — у большого пальца, сверху — как было.
+     * Перекладываем на ходу: панель переезжает, статья получает поле с другой
+     * стороны, полоса и поиск встают над ней, а выпадающие окна — с той
+     * стороны, где есть место.
+     */
+    private fun changeBarBottom(on: Boolean) {
+        if (barBottom == on) return
+        barBottom = on
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, barBottom)
+        hints.dismiss()
+        hideCard()
+        (bar.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.gravity = if (on) Gravity.BOTTOM else Gravity.TOP
+            bar.layoutParams = it
+        }
+        tabList.below(on)
+        showBar()
+        fitUnderBar()
+        // Панель после переезда меряется заново: поле статьи — по её новому росту.
+        bar.post { fitUnderBar() }
     }
 
     /** Новый набор: на диск, открытой вкладке — сразу; фоновые набираются при показе. */
@@ -1905,7 +1967,7 @@ class MainActivity : Activity(), ArticleHost {
         val imagesOn = images && !this.images
         this.dark = dark
         this.images = images
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, barBottom)
         if (themeChanged) retheme()
         if (imagesOn) currentTab()?.view?.loadAll()
     }
@@ -1914,7 +1976,7 @@ class MainActivity : Activity(), ArticleHost {
     private fun changeContrast(high: Boolean) {
         val was = theme
         contrast = high
-        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown)
+        Core.saveSettings(dark, images, archive, contrast, slideBar, notesShown, barBottom)
         if (theme != was) retheme()
     }
 
@@ -2006,7 +2068,7 @@ class MainActivity : Activity(), ArticleHost {
     }
 
     override fun released(pinch: Boolean) {
-        val height = bar.height.toFloat()
+        val height = if (barBottom) (bar.height + insetBottom).toFloat() else bar.height.toFloat()
         if (hidden <= 0f || hidden >= height) return
         val to = if (hidden > height / 2f) height else 0f
         if (pinch) placeBar(to) else moveBar(to)
@@ -2023,10 +2085,24 @@ class MainActivity : Activity(), ArticleHost {
      */
     private fun placeBar(to: Float) {
         val view = currentTab()?.view
-        val most = minOf(bar.height.toFloat(), (view?.scrollY ?: 0).toFloat())
-        hidden = to.coerceIn(0f, maxOf(0f, most))
-        bar.translationY = -hidden
-        view?.covered = bar.height - hidden.toInt()
+        val scrolled = (view?.scrollY ?: 0).toFloat()
+        // Сверху шапка прячется не дальше, чем прокручена страница: наверху
+        // статьи её начало не должно оказаться под ней. Внизу — не дальше,
+        // чем осталось листать.
+        val most = if (barBottom) {
+            val content = view?.getChildAt(0)?.height ?: 0
+            (content - (view?.height ?: 0)).toFloat() - scrolled
+        } else {
+            scrolled
+        }
+        // Уезжая вниз, шапка уходит и под системную панель — иначе остаётся
+        // торчать над жестовой полоской.
+        val limit = if (barBottom) (bar.height + insetBottom).toFloat() else bar.height.toFloat()
+        hidden = to.coerceIn(0f, maxOf(0f, minOf(limit, most)))
+        bar.translationY = if (barBottom) hidden else -hidden
+        val covered = (bar.height - hidden.toInt()).coerceAtLeast(0)
+        view?.covered = covered
+        liftFoot(if (barBottom) covered else 0)
     }
 
     /** Довести шапку до места коротким движением — после отпускания пальца. */
@@ -2051,8 +2127,21 @@ class MainActivity : Activity(), ArticleHost {
 
     /** Шапка сменила рост (поворот, кегль системы): статья оставляет под неё поле заново. */
     private fun fitUnderBar() {
-        currentTab()?.view?.reserve(bar.height)
+        currentTab()?.view?.reserve(bar.height, barBottom)
         placeBar(hidden)
+    }
+
+    /**
+     * Полоса прогресса и поиск стоят у нижнего края и поднимаются вместе с
+     * видимым краем шапки — переносом, а не отступом. Отступ отодвигал их от
+     * края разметкой и оставался на месте, когда шапка уезжала: вместо неё
+     * открывалась пустая полоса её роста цветом окна, а не бумаги. Перенос
+     * размера не меняет, поэтому разметка во время прокрутки не пересчитывается.
+     */
+    private fun liftFoot(by: Int) {
+        if (!laid) return
+        foot.translationY = -by.toFloat()
+        notice.translationY = -by.toFloat()
     }
 
     // ── поиск ───────────────────────────────────────────────────────────────

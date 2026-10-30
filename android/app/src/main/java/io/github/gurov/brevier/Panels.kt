@@ -406,6 +406,7 @@ class TabList(
     private lateinit var palette: Palette
     private var add: ImageButton? = null
     private var hide: ImageButton? = null
+    private var below = false
 
     init {
         orientation = VERTICAL
@@ -424,6 +425,40 @@ class TabList(
         list.adapter = Adapter()
         list.setOnItemClickListener { _, _, position, _ -> choose(position) }
         addView(list, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+    }
+
+    /**
+     * Шапка стоит внизу: «Tabs», «+» и «×» — у нижнего края, у большого пальца,
+     * а список растёт над ними. Строк мало — низок у края, строк много — список
+     * забирает экран, но кнопки всё равно под рукой.
+     */
+    fun below(bottom: Boolean) {
+        if (below == bottom) return
+        below = bottom
+        gravity = if (bottom) Gravity.BOTTOM else Gravity.TOP
+        removeAllViews()
+        addView(head)
+        if (bottom) addView(list, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        else addView(list, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        requestLayout()
+    }
+
+    /**
+     * Внизу шапка встаёт переносом, а не порядком детей. `LinearLayout` меряет
+     * детей по очереди и места для следующего не придерживает: окажись список
+     * первым, на полном экране вкладок он забрал бы всё, и шапке досталась бы
+     * нулевая высота — кнопки «+» и «×» пропали бы. Перенос на разметку не
+     * влияет: шапка меряется первой, а вниз уезжает уже после раскладки.
+     */
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        if (!below) {
+            head.translationY = 0f
+            list.translationY = 0f
+            return
+        }
+        head.translationY = list.height.toFloat()
+        list.translationY = -head.height.toFloat()
     }
 
     fun paint(palette: Palette) {
@@ -486,6 +521,7 @@ class SettingsPage(
     private val changed: (dark: Boolean, images: Boolean) -> Unit,
     private val contrasted: (high: Boolean) -> Unit,
     private val slid: (on: Boolean) -> Unit,
+    private val placed: (on: Boolean) -> Unit,
     private val notesUnder: (on: Boolean) -> Unit,
     private val keepCopies: (on: Boolean) -> Unit,
     private val forget: () -> Unit,
@@ -507,7 +543,7 @@ class SettingsPage(
         addView(column)
     }
 
-    fun show(palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType, slideBar: Boolean, notes: Boolean) {
+    fun show(palette: Palette, theme: Theme, images: Boolean, archive: Boolean, isBrowser: Boolean, reader: ReaderType, slideBar: Boolean, notes: Boolean, barBelow: Boolean) {
         this.dark = theme.dark
         this.theme = theme
         this.images = images
@@ -541,6 +577,13 @@ class SettingsPage(
             "Slide the bar away",
             "Reading down, the bar at the top moves out of the text's way as far as your finger goes; reading back up brings it back. Off: it stays put.",
             switch(palette, slideBar) { on -> slid(on) }, palette,
+        ))
+        column.addView(row(
+            "Bar at the bottom",
+            "The bar stands at the bottom of the screen, under your thumb, instead of under the status bar. " +
+                "Everything else stays as it was: it still slides away while you read, and the address card " +
+                "and the suggestions open above it.",
+            switch(palette, barBelow) { on -> placed(on) }, palette,
         ))
         column.addView(row(
             "Notes under their paragraphs",
@@ -800,6 +843,9 @@ class Menu(
     private val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private val icons = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
 
+    /** Раскрывать вверх: шапка стоит внизу, и вниз от неё места нет (#45). */
+    var above = false
+
     init {
         column.background = GradientDrawable().apply {
             setColor(palette.shelf)
@@ -866,7 +912,18 @@ class Menu(
     }
 
     fun show(anchor: View) {
-        popup.showAsDropDown(anchor, -context.dp(206f), -context.dp(4f))
+        // Меню — над «⋮». Сверху шапки это на 4 dp ниже неё, снизу экрана —
+        // на весь свой рост выше: иначе оно уехало бы за край.
+        val below = if (above) {
+            column.measure(
+                View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+            -(anchor.height + column.measuredHeight + context.dp(4f))
+        } else {
+            -context.dp(4f)
+        }
+        popup.showAsDropDown(anchor, -context.dp(206f), below)
     }
 
     /** Показать у точки на экране — там, где палец. Не за краем экрана. */

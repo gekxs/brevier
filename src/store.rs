@@ -652,6 +652,10 @@ pub struct Settings {
     /// и строку не пишет. По умолчанию уезжает (мейнтейнер, 25 октября 2026);
     /// в файл — только `bar stays`.
     pub slide_bar: bool,
+    /// Стоит ли шапка телефона внизу экрана (#45). Окно этого не умеет и
+    /// строку не пишет. По умолчанию — сверху, как было: низ выбирают.
+    /// В файл — только `bar-place bottom`.
+    pub bar_at_bottom: bool,
     /// Показывать ли заметки рядом с текстом (#42): на поле справа, а где
     /// места нет — под абзацем. Выключено — только подложка в тексте.
     /// По умолчанию показываем; в файл — только `notes hidden`.
@@ -678,6 +682,7 @@ impl Default for Settings {
             archive: true,
             plain_archive: false,
             slide_bar: true,
+            bar_at_bottom: false,
             notes: true,
             typography: Type::default(),
         }
@@ -725,6 +730,7 @@ impl Settings {
                 "archive" => settings.archive = value == "on",
                 "archive-files" => settings.plain_archive = value == "plain",
                 "bar" => settings.slide_bar = value != "stays",
+                "bar-place" => settings.bar_at_bottom = value == "bottom",
                 "notes" => settings.notes = value != "hidden",
                 "face" => {
                     if let Some(face) = Face::from_name(value) {
@@ -783,6 +789,9 @@ impl Settings {
         }
         if !self.slide_bar {
             text.push_str("bar\tstays\n");
+        }
+        if self.bar_at_bottom {
+            text.push_str("bar-place\tbottom\n");
         }
         if !self.notes {
             text.push_str("notes\thidden\n");
@@ -1754,6 +1763,7 @@ mod tests {
             archive: false,
             plain_archive: true,
             slide_bar: false,
+            bar_at_bottom: true,
             notes: false,
             typography: Type {
                 face: Face::Serif,

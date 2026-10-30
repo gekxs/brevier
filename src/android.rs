@@ -299,6 +299,10 @@ fn call(method: &str, arg: &str) -> String {
             if !field(5).is_empty() {
                 settings.notes = field(5) == "1";
             }
+            // Шапка внизу (#45) — так же.
+            if !field(6).is_empty() {
+                settings.bar_at_bottom = field(6) == "1";
+            }
             settings.save();
             "{}".to_owned()
         }
@@ -877,7 +881,7 @@ fn settings() -> String {
         })
         .collect();
     format!(
-        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"notes\":{},\"type\":{},\
+        "{{\"dark\":{},\"contrast\":\"{}\",\"images\":{},\"archive\":{},\"slideBar\":{},\"barBottom\":{},\"notes\":{},\"type\":{},\
          \"styles\":[{}],\"style\":{},\
          \"faces\":[{}],\"sizes\":{},\"measures\":{},\"leadings\":{}}}",
         settings.dark,
@@ -889,6 +893,7 @@ fn settings() -> String {
         settings.images,
         settings.archive,
         settings.slide_bar,
+        settings.bar_at_bottom,
         settings.notes,
         type_json(&chosen),
         styles.join(","),

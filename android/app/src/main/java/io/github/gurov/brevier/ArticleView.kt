@@ -406,16 +406,32 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     /** Где читатель: смещение строки у верхнего края. От масштаба не зависит. */
     fun place(): Int = offsetAt(visibleTop()) ?: 0
 
-    /** Поле сверху под шапку (#45): её полный рост. */
-    fun reserve(top: Int) {
-        if (paddingTop != top) setPadding(0, top, 0, 0)
+    /**
+     * Шапка стоит внизу (`reserve`, `below`): поле у статьи снизу, а закрытым
+     * у неё оказывается низ, а не верх.
+     */
+    private var barBelow = false
+
+    /** Поле под шапку (#45): её полный рост — сверху или снизу. */
+    fun reserve(top: Int, below: Boolean = false) {
+        barBelow = below
+        val top2 = if (below) 0 else top
+        val bottom = if (below) top else 0
+        if (paddingTop != top2 || paddingBottom != bottom) setPadding(0, top2, 0, bottom)
     }
 
     /** Верх видимого — под шапкой, если она видна, — на высоте колонки. */
-    fun visibleTop(): Int = scrollY - paddingTop + covered
+    fun visibleTop(): Int = if (barBelow) scrollY - paddingTop else scrollY - paddingTop + covered
 
-    /** Низ видимого на высоте колонки: снизу статью ничего не закрывает. */
-    fun visibleBottom(): Int = scrollY - paddingTop + height
+    /** Низ видимого на высоте колонки: снизу статью закрывает шапка, если она внизу. */
+    fun visibleBottom(): Int = scrollY - paddingTop + height - if (barBelow) covered else 0
+
+    /**
+     * Верх видимого окна в координатах вида: под шапкой, если она сверху,
+     * и у самого верха, если она внизу. Прыжки к месту в тексте меряются
+     * от него, а не от шапки.
+     */
+    private fun windowTop(): Int = if (barBelow) 0 else covered
 
     /** Сколько статьи видно: окно без шапки. */
     fun visibleHeight(): Int = height - covered
@@ -444,7 +460,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
     fun scrollToOffset(offset: Int, align: Float) {
         ensure(offset)
         val y = yOf(offset) ?: return
-        jump { scrollTo(0, max(0, y + paddingTop - covered - (visibleHeight() * align).toInt())) }
+        jump { scrollTo(0, max(0, y + paddingTop - windowTop() - (visibleHeight() * align).toInt())) }
     }
 
     /** Прокрутить не пальцем — прыжком: шапку (#45) это не двигает. */
@@ -531,7 +547,7 @@ class ArticleView(context: Context, private val host: ArticleHost) : ScrollView(
             val box = Rect()
             cell.getDrawingRect(box)
             frame.offsetDescendantRectToMyCoords(cell, box)
-            jump { scrollTo(0, max(0, frame.top + box.top + paddingTop - covered - (visibleHeight() * align).toInt())) }
+            jump { scrollTo(0, max(0, frame.top + box.top + paddingTop - windowTop() - (visibleHeight() * align).toInt())) }
             if (box.left < frame.scrollX || box.right > frame.scrollX + frame.width) {
                 frame.scrollTo(max(0, box.left - metrics.px(16f).toInt()), 0)
             }
