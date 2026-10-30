@@ -81,7 +81,9 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.gurov.brevier"
+        // Своя сборка ставится рядом с оригиналом: другой пакет — другие
+        // данные, и оба Brevier живут на телефоне одновременно.
+        applicationId = "io.github.gekxs.brevier"
         // API 24 — та же нижняя граница, что у канарейки в CI: ниже системный
         // проверяющий сертификаты не знает отзыва.
         minSdk = 24
